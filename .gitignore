@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets
+.env
+*.key
+*.pem
+
+# Build files
+dist/
+build/
+*.exe
+*.spec
+
+# ARGOS runtime data
+memory/*.json
+
+# Piper / downloaded models
+piper/*.onnx
+piper/voices/
+piper/*.pt
+
+# Training outputs and datasets
+training/output/
+training/data/features/
+training/data/piper/
+
+# Generated project trees
+ARGOS_tree.txt
+tree.txt
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/

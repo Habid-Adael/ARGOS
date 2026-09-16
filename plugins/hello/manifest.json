@@ -1,0 +1,7 @@
+{
+    "name": "hello",
+    "version": "1.0.0",
+    "description": "First ARGOS plugin",
+    "author": "Habid",
+    "entry": "tool.py"
+}
