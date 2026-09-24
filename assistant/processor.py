@@ -1,153 +1,150 @@
+import os
+import sys
+import importlib.util
+from ai.tool_loader import get_tools, reload_tools
 from ai.brain import ask
-from ai.tool_loader import get_tools
-from ai.tool_selector import choose_tool
+from speech.speak import speak
 
-from assistant.fast_router import fast_route
-from assistant.planner import create_plan
-from assistant.memory_manager import handle_automatic_memory
-from assistant.confirmations import request
+# Intentar importar la función de selección desde ai.tool_selector
+try:
+    from ai.tool_selector import select_tool
+except ImportError:
+    try:
+        from ai.tool_selector import select_tool_with_ai as select_tool
+    except ImportError:
+        try:
+            from ai.tool_selector import choose_tool as select_tool
+        except ImportError:
+            def select_tool(user_input, available_tools):
+                prompt = f"""
+You are the Tool Selection Module for A.R.G.O.S.
+Analyze the user command and select the appropriate tool.
 
-from assistant.context import get_last_app
+Available tools: {list(available_tools.keys())}
+User command: "{user_input}"
+
+Rules:
+1. Return ONLY the exact tool name if an existing tool fits.
+2. Return 'NEED_SELF_CREATION' if no existing tool can perform the task.
+3. Return 'CONVERSATION' for casual chat.
+"""
+                try:
+                    res = ask(prompt)
+                    if res:
+                        return res.strip().replace("`", "").replace("'", "").replace('"', '')
+                except Exception:
+                    pass
+                return "NEED_SELF_CREATION"
 
 
-def process(command):
+def load_and_run_module(tool_name, user_input):
+    """
+    Carga e importa dinámicamente el archivo .py recién creado desde el disco
+    y ejecuta su función run(user_input) sin reiniciar el programa.
+    """
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools")
+    file_path = os.path.join(tools_dir, f"{tool_name}.py")
 
-    print("Processor started")
+    if not os.path.exists(file_path):
+        print(f"[A.R.G.O.S. Error] File not found: {file_path}")
+        return None
 
-    # ----------------------------------
-    # Conversation Context
-    # ----------------------------------
+    try:
+        # Cargar el módulo dinámicamente
+        spec = importlib.util.spec_from_file_location(tool_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
-    last_app = get_last_app()
+        if hasattr(module, "run"):
+            print(f"[A.R.G.O.S.] Executing newly created module '{tool_name}'...")
+            return module.run(user_input)
+        else:
+            print(f"[A.R.G.O.S. Error] Module '{tool_name}' has no run() function.")
+    except Exception as e:
+        print(f"[A.R.G.O.S. Error] Failed to execute module '{tool_name}': {e}")
+    return None
 
-    if last_app:
 
-        replacements = [
-            "it",
-            "that",
-            "that app",
-            "the app"
-        ]
+def process(user_input):
+    if not user_input:
+        return ""
 
-        lower = command.lower()
+    cleaned_input = str(user_input).strip()
 
-        for word in replacements:
+    print("\n" + "=" * 55)
+    print(f"[A.R.G.O.S.] Processing command: '{cleaned_input}'")
 
-            lower = lower.replace(word, last_app)
-
-        command = lower
-
-    # ----------------------------------
-    # Automatic Memory
-    # ----------------------------------
-
-    memory_response = handle_automatic_memory(command)
-
-    print("After automatic memory")
-
-    if memory_response:
-        return memory_response
-
-    # ----------------------------------
-    # Load tools
-    # ----------------------------------
-
-    print("Loading tools")
-
+    # 1. Cargar herramientas instaladas
     tools = get_tools()
+    print("[A.R.G.O.S.] Searching installed tools via ai.tool_loader...")
+    print(f"[A.R.G.O.S.] Loaded tools: {list(tools.keys())}")
 
-    print("Available tools:", list(tools.keys()))
+    # 2. Seleccionar la herramienta
+    print("[A.R.G.O.S.] Evaluating command with tool selector...")
+    try:
+        selected_tool_name = select_tool(cleaned_input, tools)
+    except Exception as e:
+        print(f"[A.R.G.O.S. Error] Tool selection exception: {e}")
+        selected_tool_name = "NEED_SELF_CREATION"
 
-    # ----------------------------------
-    # Planner
-    # ----------------------------------
+    print(f"[A.R.G.O.S.] Tool chosen: '{selected_tool_name}'")
 
-    print("Creating plan")
+    # 3. Intentar ejecutar la herramienta si ya existe
+    if selected_tool_name in tools:
+        tool = tools[selected_tool_name]
+        if hasattr(tool, "run"):
+            try:
+                print(f"[A.R.G.O.S.] Executing existing tool '{selected_tool_name}'...")
+                result = tool.run(cleaned_input)
+                if result:
+                    return result
+            except Exception as e:
+                print(f"[A.R.G.O.S. Error] Failed executing '{selected_tool_name}': {e}")
 
-    plan = create_plan(command)
+    # 4. PROTOCOLO DE AUTOCREACIÓN Y EJECUCIÓN EN CALIENTE (Sin Reinicio)
+    if selected_tool_name not in tools and selected_tool_name not in ["CONVERSATION", "CHAT"]:
+        print(f"[A.R.G.O.S.] Tool '{selected_tool_name}' not found. Initiating Automatic Self-Creation...")
 
-    if len(plan) > 1:
+        tool_creator = tools.get("tool_creator")
+        if tool_creator and hasattr(tool_creator, "run"):
+            print("[A.R.G.O.S.] Invoking 'tool_creator' module...")
+            created_tool_name = tool_creator.run(cleaned_input)
 
-        print("Executing plan")
+            if created_tool_name and "Failed" not in created_tool_name and "Error" not in created_tool_name:
+                tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools")
+                file_path = os.path.join(tools_dir, f"{created_tool_name}.py")
 
-        results = []
+                # Mostrar el código generado en consola
+                if os.path.exists(file_path):
+                    print(f"\n--- [File {created_tool_name}.py Created] ---")
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            print(f.read())
+                    except Exception as e:
+                        print(f"Could not read generated file: {e}")
+                    print("-" * 45 + "\n")
 
-        for step in plan:
+                # Actualizar el diccionario de herramientas en memoria
+                reload_tools()
 
-            tool_name = step.get("tool")
-            tool_command = step.get("command")
+                # Ejecutar la nueva herramienta inmediatamente sin reiniciar
+                print(f"[A.R.G.O.S.] Executing '{created_tool_name}' instantly...")
+                speak(f"Created {created_tool_name}. Executing now.")
+                
+                result = load_and_run_module(created_tool_name, cleaned_input)
+                if result:
+                    return result
+                return f"Successfully created and executed {created_tool_name}."
+            else:
+                print("[A.R.G.O.S. Error] Self-creation protocol failed.")
 
-            if tool_name not in tools:
-                print("Planner requested unknown tool:", tool_name)
-                continue
+    # 5. Fallback a conversación general con ai.brain (Ollama)
+    print("[A.R.G.O.S.] Redirecting query to ai.brain (Ollama)...")
+    try:
+        response = ask(cleaned_input)
+        if response:
+            return response
+    except Exception as e:
+        print(f"[A.R.G.O.S. Error] Brain execution error: {e}")
 
-            tool = tools[tool_name]
-
-            print("Planner tool:", tool_name)
-
-            result = tool.run(tool_command)
-
-            if result == "CONFIRM_SHUTDOWN":
-                request("shutdown")
-                return "Are you sure you want to shut down the computer?"
-
-            if result == "CONFIRM_RESTART":
-                request("restart")
-                return "Are you sure you want to restart the computer?"
-
-            if result:
-                results.append(result)
-
-        if results:
-            return "\n".join(results)
-
-    # ----------------------------------
-    # Fast Router
-    # ----------------------------------
-
-    tool_name = fast_route(command)
-
-    print("Fast Router:", tool_name)
-
-    # ----------------------------------
-    # AI Tool Selector
-    # ----------------------------------
-
-    if tool_name is None:
-
-        tool_name = choose_tool(command)
-
-        print("AI Selector:", tool_name)
-
-    # ----------------------------------
-    # Execute Tool
-    # ----------------------------------
-
-    if tool_name in tools:
-
-        tool = tools[tool_name]
-
-        print("Executing:", tool_name)
-
-        result = tool.run(command)
-
-        print("Tool returned:", result)
-
-        if result == "CONFIRM_SHUTDOWN":
-            request("shutdown")
-            return "Are you sure you want to shut down the computer?"
-
-        if result == "CONFIRM_RESTART":
-            request("restart")
-            return "Are you sure you want to restart the computer?"
-
-        if result:
-            return result
-
-    # ----------------------------------
-    # AI
-    # ----------------------------------
-
-    print("Calling Ollama")
-
-    return ask(command)
+    return "Could not process the request."

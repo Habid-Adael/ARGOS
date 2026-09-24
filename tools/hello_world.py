@@ -1,4 +1,3 @@
-```python
 NAME = "hello_world"
 
 DESCRIPTION = "Greets the user with 'Hello' from ARGOS."
@@ -16,4 +15,3 @@ def run(command):
         return "Hello from ARGOS"
     else:
         return f"Command {command} not recognized."
-```

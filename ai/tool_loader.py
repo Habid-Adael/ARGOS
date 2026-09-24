@@ -1,154 +1,70 @@
+import importlib.util
 import os
 import sys
-import importlib.util
 
-TOOLS = {}
-
-IGNORED_TOOLS = [
-    "record_wakeword",
-]
+TOOLS_FOLDER = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "tools")
+)
 
 
 def get_tools_folder():
-
-    if getattr(sys, "frozen", False):
-
-        exe_dir = os.path.dirname(sys.executable)
-
-        internal = os.path.join(exe_dir, "_internal", "tools")
-        if os.path.isdir(internal):
-            return internal
-
-        normal = os.path.join(exe_dir, "tools")
-        if os.path.isdir(normal):
-            return normal
-
-        if hasattr(sys, "_MEIPASS"):
-            meipass = os.path.join(sys._MEIPASS, "tools")
-            if os.path.isdir(meipass):
-                return meipass
-
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "tools",
-    )
+    return TOOLS_FOLDER
 
 
-def load_module(module_name, path):
+def load_tools_from_folder(folder_path=None):
+    if folder_path is None:
+        folder_path = get_tools_folder()
 
-    unique_name = f"argos_tool_{module_name}"
+    tools = {}
+    print(f"Loading tools from: {folder_path}")
 
-    spec = importlib.util.spec_from_file_location(
-        unique_name,
-        path
-    )
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith(".py") and not file_name.startswith("__"):
+            module_name = file_name[:-3]
+            file_path = os.path.join(folder_path, file_name)
 
-    if spec is None:
-        raise ImportError(f"Cannot create spec for {module_name}")
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    module_name, file_path
+                )
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                tools[module_name] = module
+                print(f"Loaded: {module_name}")
 
-    module = importlib.util.module_from_spec(spec)
+            except Exception as e:
+                print(
+                    f"Failed to load {module_name}: {e}. Triggering auto-fix..."
+                )
+                try:
+                    from tools import tool_editor
 
-    spec.loader.exec_module(module)
+                    tool_editor.run(
+                        command=f"Fix import failure: {e}",
+                        tool_name=file_name,
+                        error_msg=str(e),
+                    )
+                except Exception as editor_err:
+                    print(f"Auto-fix failed to launch: {editor_err}")
 
-    return module
-
-
-def load_tools():
-
-    global TOOLS
-    TOOLS = {}
-
-    folder = get_tools_folder()
-
-    print("Loading tools from:", folder)
-
-    if not os.path.isdir(folder):
-        raise FileNotFoundError(folder)
-
-    for file in os.listdir(folder):
-
-        if not file.endswith(".py"):
-            continue
-
-        if file == "__init__.py":
-            continue
-
-        module_name = file[:-3]
-
-        if module_name in IGNORED_TOOLS:
-            continue
-
-        path = os.path.join(folder, file)
-
-        try:
-
-            module = load_module(module_name, path)
-
-            name = getattr(module, "NAME", module_name)
-
-            TOOLS[name] = {
-
-                "name": name,
-
-                "description": getattr(
-                    module,
-                    "DESCRIPTION",
-                    "No description."
-                ),
-
-                "examples": getattr(
-                    module,
-                    "EXAMPLES",
-                    []
-                ),
-
-                "version": getattr(
-                    module,
-                    "VERSION",
-                    "1.0"
-                ),
-
-                "author": getattr(
-                    module,
-                    "AUTHOR",
-                    "Unknown"
-                ),
-
-                "module": module,
-
-            }
-
-            print(f"Loaded: {name}")
-
-        except Exception as e:
-
-            print(f"Failed to load {module_name}: {e}")
-
-    return TOOLS
+    return tools
 
 
-def reload_tools():
-    return load_tools()
+_tools_cache = None
 
 
 def get_tools():
-
-    if not TOOLS:
-        load_tools()
-
-    return TOOLS
-
-
-def get_tool(name):
-
-    return get_tools().get(name)
+    global _tools_cache
+    if _tools_cache is None:
+        _tools_cache = load_tools_from_folder()
+    return _tools_cache
 
 
-def get_tool_module(name):
+def reload_tools():
+    global _tools_cache
+    _tools_cache = load_tools_from_folder()
+    return _tools_cache
 
-    tool = get_tool(name)
 
-    if tool is None:
-        return None
-
-    return tool["module"]
+load_tools = get_tools
